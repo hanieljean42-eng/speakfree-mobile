@@ -1,0 +1,159 @@
+name: Backend CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+      - '.github/workflows/backend-ci.yml'
+  pull_request:
+    branches: [main, develop]
+    paths:
+      - 'backend/**'
+
+env:
+  NODE_VERSION: '18.x'
+
+jobs:
+  test:
+    name: Tests & Linting
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: rootpassword
+          MYSQL_DATABASE: speakfree_test
+          MYSQL_USER: test_user
+          MYSQL_PASSWORD: test_pass
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: backend/package-lock.json
+
+      - name: 📦 Install dependencies
+        working-directory: backend
+        run: npm ci
+
+      - name: 🔨 Generate Prisma Client
+        working-directory: backend
+        run: npx prisma generate
+
+      - name: 🗄️ Run migrations
+        working-directory: backend
+        env:
+          DATABASE_URL: mysql://test_user:test_pass@localhost:3306/speakfree_test
+        run: npx prisma migrate deploy
+
+      - name: 🧪 Run tests
+        working-directory: backend
+        env:
+          DATABASE_URL: mysql://test_user:test_pass@localhost:3306/speakfree_test
+          JWT_SECRET: test-jwt-secret-key
+          JWT_REFRESH_SECRET: test-jwt-refresh-secret-key
+          REDIS_HOST: localhost
+          REDIS_PORT: 6379
+        run: npm run test
+
+      - name: 🎨 Lint code
+        working-directory: backend
+        run: npm run lint
+
+      - name: 📊 Upload coverage
+        uses: codecov/codecov-action@v3
+        if: always()
+        with:
+          files: ./backend/coverage/lcov.info
+          flags: backend
+
+  build:
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🔐 Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+
+      - name: 🏗️ Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile.prod
+          push: true
+          tags: |
+            ${{ secrets.DOCKER_USERNAME }}/speakfree-backend:latest
+            ${{ secrets.DOCKER_USERNAME }}/speakfree-backend:${{ github.sha }}
+          cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/speakfree-backend:latest
+          cache-to: type=inline
+
+  deploy:
+    name: Deploy to Production
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    environment:
+      name: production
+      url: https://api.speakfree.com
+
+    steps:
+      - name: 📥 Checkout code
+        uses: actions/checkout@v4
+
+      - name: 🚀 Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            cd /opt/speakfree
+            docker-compose pull backend
+            docker-compose up -d backend
+            docker-compose exec -T backend npx prisma migrate deploy
+            docker system prune -f
+
+      - name: 🔔 Notify success
+        if: success()
+        run: |
+          echo "✅ Deployment successful!"
+          echo "Backend deployed at: https://api.speakfree.com"
+
+      - name: 🔔 Notify failure
+        if: failure()
+        run: |
+          echo "❌ Deployment failed!"
+          exit 1

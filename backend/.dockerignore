@@ -1,10 +1,43 @@
 node_modules
 dist
-.env
-.env.local
 npm-debug.log
 coverage
 .DS_Store
 *.db
 *.sqlite
 uploads
+
+# Environment files (will be set in production)
+.env
+.env.local
+.env.development
+.env.test
+
+# Testing
+*.test.ts
+*.spec.ts
+test
+
+# Documentation
+*.md
+docs
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Git
+.git
+.gitignore
+.github
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# Prisma migrations (generated in container)
+prisma/migrations/*/migration.sql
+!prisma/schema.prisma
