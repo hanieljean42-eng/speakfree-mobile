@@ -11,6 +11,7 @@ import { StatsModule } from './stats/stats.module';
 import { FilesModule } from './files/files.module';
 import { NotificationsModule } from './notifications/notifications.module';
 import { AuditModule } from './audit/audit.module';
+import { HealthModule } from './health/health.module';
 
 @Module({
   imports: [
@@ -33,6 +34,7 @@ import { AuditModule } from './audit/audit.module';
 
     // Core modules
     PrismaModule,
+    AuditModule,
     AuthModule,
     SchoolsModule,
     ReportsModule,
@@ -40,7 +42,7 @@ import { AuditModule } from './audit/audit.module';
     StatsModule,
     FilesModule,
     NotificationsModule,
-    AuditModule,
+    HealthModule,
   ],
 })
 export class AppModule {}
