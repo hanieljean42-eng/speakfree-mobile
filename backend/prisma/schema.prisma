@@ -1,0 +1,193 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+// Super Admins (gestion globale)
+model SuperAdmin {
+  id           String   @id @default(uuid()) @db.VarChar(36)
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @map("password_hash") @db.VarChar(255)
+  code         String   @unique @db.VarChar(10) // Code 200700
+  isActive     Boolean  @default(true) @map("is_active")
+  createdAt    DateTime @default(now()) @map("created_at")
+  updatedAt    DateTime @updatedAt @map("updated_at")
+
+  auditLogs AuditLog[]
+
+  @@map("super_admins")
+  @@index([email])
+}
+
+// Établissements scolaires
+model School {
+  id           String       @id @default(uuid()) @db.VarChar(36)
+  name         String       @db.VarChar(255)
+  email        String       @unique @db.VarChar(255)
+  phone        String?      @db.VarChar(20)
+  address      String?      @db.Text
+  city         String?      @db.VarChar(100)
+  type         SchoolType   @default(COLLEGE) // COLLEGE, LYCEE, UNIVERSITE
+  passwordHash String       @map("password_hash") @db.VarChar(255)
+  status       SchoolStatus @default(PENDING) // PENDING, ACTIVE, INACTIVE, REJECTED
+  rejectionReason String?   @map("rejection_reason") @db.Text
+  createdAt    DateTime     @default(now()) @map("created_at")
+  updatedAt    DateTime     @updatedAt @map("updated_at")
+
+  reports   Report[]
+  messages  Message[]
+  auditLogs AuditLog[]
+
+  @@map("schools")
+  @@index([email])
+  @@index([status])
+}
+
+enum SchoolType {
+  COLLEGE
+  LYCEE
+  UNIVERSITE
+  AUTRE
+}
+
+enum SchoolStatus {
+  PENDING
+  ACTIVE
+  INACTIVE
+  REJECTED
+}
+
+// Signalements
+model Report {
+  id              String       @id @default(uuid()) @db.VarChar(36)
+  schoolId        String       @map("school_id") @db.VarChar(36)
+  reportCode      String       @unique @map("report_code") @db.VarChar(12) // RPT-XXXXX
+  discussionCode  String       @unique @map("discussion_code") @db.VarChar(12) // DSC-XXXXX
+  type            ReportType
+  incidentDate    DateTime?    @map("incident_date")
+  place           String?      @db.VarChar(255)
+  description     String       @db.Text
+  witnesses       String?      @db.Text
+  status          ReportStatus @default(PENDING)
+  resolvedAt      DateTime?    @map("resolved_at")
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+
+  school   School    @relation(fields: [schoolId], references: [id], onDelete: Cascade)
+  messages Message[]
+  files    File[]
+
+  @@map("reports")
+  @@index([schoolId])
+  @@index([reportCode])
+  @@index([discussionCode])
+  @@index([status])
+  @@index([createdAt])
+}
+
+enum ReportType {
+  HARCELEMENT_PHYSIQUE
+  HARCELEMENT_VERBAL
+  CYBER_HARCELEMENT
+  DISCRIMINATION
+  VIOLENCE
+  VOL
+  AUTRE
+}
+
+enum ReportStatus {
+  PENDING      // En attente
+  IN_PROGRESS  // En cours
+  RESOLVED     // Résolu
+  CLOSED       // Fermé
+}
+
+// Messages de discussion
+model Message {
+  id             String      @id @default(uuid()) @db.VarChar(36)
+  reportId       String      @map("report_id") @db.VarChar(36)
+  schoolId       String?     @map("school_id") @db.VarChar(36) // null = élève
+  sender         MessageSender
+  content        String      @db.Text
+  isRead         Boolean     @default(false) @map("is_read")
+  createdAt      DateTime    @default(now()) @map("created_at")
+
+  report Report  @relation(fields: [reportId], references: [id], onDelete: Cascade)
+  school School? @relation(fields: [schoolId], references: [id], onDelete: SetNull)
+
+  @@map("messages")
+  @@index([reportId])
+  @@index([createdAt])
+}
+
+enum MessageSender {
+  STUDENT
+  SCHOOL
+}
+
+// Fichiers joints (optionnel)
+model File {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  reportId  String   @map("report_id") @db.VarChar(36)
+  filename  String   @db.VarChar(255)
+  mimeType  String   @map("mime_type") @db.VarChar(100)
+  size      Int
+  url       String   @db.Text // URL S3
+  createdAt DateTime @default(now()) @map("created_at")
+
+  report Report @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@map("files")
+  @@index([reportId])
+}
+
+// Logs d'audit
+model AuditLog {
+  id          String    @id @default(uuid()) @db.VarChar(36)
+  actorType   ActorType @map("actor_type")
+  actorId     String?   @map("actor_id") @db.VarChar(36)
+  action      String    @db.VarChar(100)
+  resource    String?   @db.VarChar(100)
+  resourceId  String?   @map("resource_id") @db.VarChar(36)
+  metadata    Json?
+  ipAddress   String?   @map("ip_address") @db.VarChar(45)
+  userAgent   String?   @map("user_agent") @db.Text
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  superAdmin SuperAdmin? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+  school     School?     @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@map("audit_logs")
+  @@index([actorType, actorId])
+  @@index([action])
+  @@index([createdAt])
+}
+
+enum ActorType {
+  SUPER_ADMIN
+  SCHOOL
+  STUDENT
+  SYSTEM
+}
+
+// Tokens de réinitialisation de mot de passe
+model PasswordResetToken {
+  id        String   @id @default(uuid()) @db.VarChar(36)
+  email     String   @db.VarChar(255)
+  token     String   @unique @db.VarChar(255)
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  @@map("password_reset_tokens")
+  @@index([email])
+  @@index([token])
+  @@index([expiresAt])
+}
